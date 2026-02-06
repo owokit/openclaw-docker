@@ -33,23 +33,6 @@ validate_port() {
   fi
 }
 
-configure_git_auth() {
-  if [ -z "${GITHUB_TOKEN:-}" ]; then
-    return
-  fi
-
-  GIT_CREDENTIALS_FILE="${HOME}/.git-credentials"
-
-  # 仅使用标准 HTTPS 凭据存储，避免每次 git 操作都重复交互。
-  git config --global credential.helper "store --file=${GIT_CREDENTIALS_FILE}"
-  git config --global credential.useHttpPath true
-
-  umask 077
-  printf 'https://x-access-token:%s@github.com\n' "${GITHUB_TOKEN}" > "${GIT_CREDENTIALS_FILE}"
-  chmod 600 "${GIT_CREDENTIALS_FILE}"
-  echo "[entrypoint] 已自动配置 GitHub token 凭据（GITHUB_TOKEN）"
-}
-
 apply_base_config() {
   echo "[entrypoint] 正在应用 OpenClaw 基础配置..."
   openclaw config set 'agents.defaults.thinkingDefault' 'medium'
@@ -113,7 +96,10 @@ PY
 }
 
 validate_port
-configure_git_auth
+
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  echo "[entrypoint] 检测到 GITHUB_TOKEN，但当前镜像已改为 gh auth login 流程，忽略该变量"
+fi
 
 if [ "${OPENCLAW_AUTO_CONFIG}" = "true" ]; then
   apply_base_config

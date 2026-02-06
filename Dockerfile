@@ -1,63 +1,63 @@
-FROM public.ecr.aws/amazonlinux/amazonlinux:2023
+FROM ubuntu:24.04
 
 # 容器级默认变量：
 # - OPENCLAW_HOME：非 root 用户的 OpenClaw 运行配置目录。
 # - OPENCLAW_PORT：gateway 监听端口，可通过 -e OPENCLAW_PORT=xxxx 在运行时覆盖。
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
+    DEBIAN_FRONTEND=noninteractive \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_FUND=false \
     OPENCLAW_HOME=/home/node/.openclaw \
+    GH_CONFIG_DIR=/home/node/.openclaw/gh \
     OPENCLAW_PORT=18789
 
 ARG OPENCLAW_VERSION=latest
+ARG NODE_MAJOR=24
 
-# 使用 dnf 安装运行时与工具链（包管理优先）：
-# - nodejs24：openclaw CLI 依赖。
-# - python3.13/pip：Python 运行时与 boto3 依赖。
-# - git/git-lfs/awscli-2：你要求的 CI/CD 与仓库操作工具。
-RUN dnf install -y --setopt=install_weak_deps=False \
-      nodejs24 \
-      nodejs24-npm \
-      python3.13 \
-      python3.13-pip \
+# 使用 Ubuntu 24.04（最新 LTS）并通过 apt 安装基础工具链。
+# Ubuntu 官方源的 nodejs 版本通常偏旧，改用 NodeSource 安装 Node.js LTS。
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      gnupg \
+      software-properties-common && \
+    add-apt-repository -y ppa:deadsnakes/ppa && \
+    mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
       git \
       git-lfs \
-      awscli-2 \
-      ca-certificates \
-      shadow-utils && \
-    dnf clean all && \
-    rm -rf /var/cache/dnf
+      gh \
+      awscli \
+      python3.13 \
+      python3.13-venv \
+      nodejs && \
+    rm -rf /var/lib/apt/lists/*
 
-# 全局安装 OpenClaw CLI，并安装 AWS 自动化常用的 boto3。
-RUN if ! command -v node >/dev/null 2>&1 && command -v node-24 >/dev/null 2>&1; then ln -sf /usr/bin/node-24 /usr/local/bin/node; fi && \
-    if ! command -v npm >/dev/null 2>&1 && command -v npm-24 >/dev/null 2>&1; then ln -sf /usr/bin/npm-24 /usr/local/bin/npm; fi && \
-    node --version && npm --version && \
-    npm install -g --omit=dev --no-audit "openclaw@${OPENCLAW_VERSION}" && \
-    npm cache clean --force && \
-    python3.13 -m pip install --no-cache-dir --upgrade pip boto3
-
-# 统一 python/pip 命令名，避免版本差异导致命令不一致。
-RUN ln -sf /usr/bin/python3.13 /usr/local/bin/python3 && \
+# 全局安装 OpenClaw CLI，并配置 python/pip 运行时。
+RUN git lfs install --system && \
+    curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && \
+    python3.13 /tmp/get-pip.py && \
+    rm -f /tmp/get-pip.py && \
+    python3.13 -m pip install --no-cache-dir boto3 && \
+    ln -sf /usr/bin/python3.13 /usr/local/bin/python3 && \
     ln -sf /usr/bin/python3.13 /usr/local/bin/python && \
-    ln -sf /usr/bin/pip3.13 /usr/local/bin/pip3 && \
-    ln -sf /usr/bin/pip3.13 /usr/local/bin/pip
-
-# 在系统范围启用 Git LFS。
-RUN git lfs install --system
+    npm install -g --omit=dev --no-audit "openclaw@${OPENCLAW_VERSION}" && \
+    npm cache clean --force
 
 # 创建非 root 用户，提升运行安全性。
-RUN useradd -m -u 1000 -s /sbin/nologin node && \
+RUN useradd -m -u 1000 -s /usr/sbin/nologin node && \
     mkdir -p "${OPENCLAW_HOME}" && \
     chown -R node:node /home/node && \
     chmod 700 "${OPENCLAW_HOME}"
 
 # 启动脚本会自动应用你要求的 OpenClaw 默认配置与可选 Discord allowlist JSON，
 # 若未传入自定义命令，则默认启动 `openclaw gateway`。
-COPY docker/entrypoint.sh /usr/local/bin/openclaw-entrypoint.sh
-RUN chmod +x /usr/local/bin/openclaw-entrypoint.sh
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/openclaw-entrypoint.sh
 
 WORKDIR /workspace
 USER node
