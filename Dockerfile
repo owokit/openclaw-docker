@@ -23,29 +23,28 @@ RUN apt-get update && \
       curl \
       gnupg \
       software-properties-common && \
-    add-apt-repository -y ppa:deadsnakes/ppa && \
     mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
       git \
       git-lfs \
-      gh \
       awscli \
-      python3.13 \
-      python3.13-venv \
+      python3 \
+      python3-venv \
+      python3-pip \
+      gh \
       nodejs && \
     rm -rf /var/lib/apt/lists/*
 
 # 全局安装 OpenClaw CLI，并配置 python/pip 运行时。
 RUN git lfs install --system && \
-    curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && \
-    python3.13 /tmp/get-pip.py && \
-    rm -f /tmp/get-pip.py && \
-    python3.13 -m pip install --no-cache-dir boto3 && \
-    ln -sf /usr/bin/python3.13 /usr/local/bin/python3 && \
-    ln -sf /usr/bin/python3.13 /usr/local/bin/python && \
+    python3 -m pip install --no-cache-dir boto3 && \
+    ln -sf /usr/bin/python3 /usr/local/bin/python && \
     npm install -g --omit=dev --no-audit "openclaw@${OPENCLAW_VERSION}" && \
     npm cache clean --force
 
@@ -67,7 +66,7 @@ EXPOSE 18789
 
 # 基础健康检查：检查本地 gateway 端口是否可连通。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD python3.13 -c "import os,socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1', int(os.getenv('OPENCLAW_PORT','18789')))); s.close()" || exit 1
+  CMD python3 -c "import os,socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1', int(os.getenv('OPENCLAW_PORT','18789')))); s.close()" || exit 1
 
 ENTRYPOINT ["/usr/local/bin/openclaw-entrypoint.sh"]
 CMD []
