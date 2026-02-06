@@ -2,6 +2,7 @@
 
 用于构建和发布 OpenClaw Docker 镜像（Amazon Linux 2023，`dnf` 包管理优先）。
 镜像内预装：Node.js 24、Python 3.13、`gh`、`git-lfs`、AWS CLI v2、`boto3`、`openclaw` CLI。
+说明：Amazon Linux 2023 默认仓库不提供 `gh`，镜像会自动从 GitHub 官方 release 安装 `gh`（按架构自动匹配）。
 
 ## 1. 文件说明
 
