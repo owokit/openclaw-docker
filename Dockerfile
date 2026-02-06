@@ -13,22 +13,19 @@ ENV LANG=C.UTF-8 \
     OPENCLAW_PORT=18789
 
 ARG OPENCLAW_VERSION=latest
-ARG GH_VERSION=latest
 ARG TARGETOS
 ARG TARGETARCH
 
 # 使用 dnf 安装运行时与工具链（包管理优先）：
-# - nodejs24：openclaw CLI 依赖。
-# - python3.13/pip：Python 运行时与 boto3 依赖。
-# - git/git-lfs/awscli-2：你要求的 CI/CD 与仓库操作工具。
-RUN dnf install -y --setopt=install_weak_deps=False \
-      nodejs24 \
-      nodejs24-npm \
-      python3.13 \
-      python3.13-pip \
+# - nodejs：openclaw CLI 依赖（优先安装新版本，失败则自动降级）。
+# - python3/pip：Python 运行时与 boto3 依赖。
+# - git/git-lfs：你要求的 CI/CD 与仓库操作工具。
+RUN set -eux; \
+    dnf install -y --setopt=install_weak_deps=False \
+      python3 \
+      python3-pip \
       git \
       git-lfs \
-      awscli-2 \
       ca-certificates \
       curl-minimal \
       coreutils \
@@ -36,50 +33,64 @@ RUN dnf install -y --setopt=install_weak_deps=False \
       grep \
       gzip \
       tar \
-      shadow-utils && \
-    dnf clean all && \
+      unzip \
+      shadow-utils; \
+    for pkg in nodejs24 nodejs22 nodejs20 nodejs; do \
+      if dnf install -y --setopt=install_weak_deps=False "${pkg}" nodejs-npm || dnf install -y --setopt=install_weak_deps=False "${pkg}"; then \
+        break; \
+      fi; \
+    done; \
+    if ! command -v npm >/dev/null 2>&1; then \
+      dnf install -y --setopt=install_weak_deps=False nodejs-npm || dnf install -y --setopt=install_weak_deps=False npm; \
+    fi; \
+    node --version; \
+    npm --version; \
+    python3 --version; \
+    dnf clean all; \
     rm -rf /var/cache/dnf
 
-# 安装 GitHub CLI（gh）
-# Amazon Linux 的 repo 不一定包含 gh，因此使用官方 release 的静态二进制包安装。
+# 安装 AWS CLI v2（官方安装包，避免不同 Amazon Linux repo 包名差异导致失败）
 RUN set -eux; \
     case "${TARGETARCH:-$(uname -m)}" in \
-      amd64|x86_64) GH_ARCH="amd64" ;; \
-      arm64|aarch64) GH_ARCH="arm64" ;; \
-      *) echo "Unsupported arch for gh: ${TARGETARCH:-$(uname -m)}" >&2; exit 1 ;; \
+      amd64|x86_64) AWS_ARCH="x86_64" ;; \
+      arm64|aarch64) AWS_ARCH="aarch64" ;; \
+      *) echo "Unsupported arch for awscli: ${TARGETARCH:-$(uname -m)}" >&2; exit 1 ;; \
     esac; \
-    if [ "${GH_VERSION}" = "latest" ]; then \
-      PYBIN="$(command -v python3.13 || command -v python3 || command -v python)"; \
-      echo "Resolve GH_VERSION=latest via ${PYBIN}"; \
-      GH_VERSION="$("${PYBIN}" - <<'PY'\nimport json\nimport sys\nimport urllib.request\n\nurl = 'https://api.github.com/repos/cli/cli/releases/latest'\nreq = urllib.request.Request(url, headers={'User-Agent': 'openclaw-docker'})\nwith urllib.request.urlopen(req, timeout=30) as resp:\n    data = json.load(resp)\ntag = data.get('tag_name') or ''\nif tag.startswith('v'):\n    tag = tag[1:]\nif not tag:\n    print('Failed to resolve gh latest version', file=sys.stderr)\n    sys.exit(1)\nprint(tag)\nPY)"; \
-    fi; \
     tmp="$(mktemp -d)"; \
     cd "${tmp}"; \
-    gh_tgz="gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz"; \
-    gh_url="https://github.com/cli/cli/releases/download/v${GH_VERSION}/${gh_tgz}"; \
-    sums_url="https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_checksums.txt"; \
-    curl -fsSLO "${gh_url}"; \
-    curl -fsSLO "${sums_url}"; \
-    grep " ${gh_tgz}\$" "gh_${GH_VERSION}_checksums.txt" | sha256sum -c -; \
-    tar -xzf "${gh_tgz}"; \
-    install -m 0755 gh_"${GH_VERSION}"_linux_"${GH_ARCH}"/bin/gh /usr/local/bin/gh; \
-    /usr/local/bin/gh --version; \
+    curl -fsSLo awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}.zip"; \
+    unzip -q awscliv2.zip; \
+    ./aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update; \
+    /usr/local/bin/aws --version; \
     cd /; \
     rm -rf "${tmp}"
 
+# 安装 GitHub CLI（gh）
+# 按 GitHub 官方 RPM 指南安装（兼容 Amazon Linux）。
+RUN set -eux; \
+    if dnf --version 2>/dev/null | head -n1 | grep -q '^dnf5'; then \
+      dnf install -y --setopt=install_weak_deps=False dnf5-plugins; \
+      dnf config-manager addrepo --from-repofile=https://cli.github.com/packages/rpm/gh-cli.repo; \
+    else \
+      dnf install -y --setopt=install_weak_deps=False 'dnf-command(config-manager)'; \
+      dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo; \
+    fi; \
+    dnf install -y --setopt=install_weak_deps=False gh --repo gh-cli; \
+    gh --version; \
+    dnf clean all; \
+    rm -rf /var/cache/dnf
+
 # 全局安装 OpenClaw CLI，并安装 AWS 自动化常用的 boto3。
-RUN if ! command -v node >/dev/null 2>&1 && command -v node-24 >/dev/null 2>&1; then ln -sf /usr/bin/node-24 /usr/local/bin/node; fi && \
-    if ! command -v npm >/dev/null 2>&1 && command -v npm-24 >/dev/null 2>&1; then ln -sf /usr/bin/npm-24 /usr/local/bin/npm; fi && \
-    node --version && npm --version && \
+RUN node --version && npm --version && \
     npm install -g --omit=dev --no-audit "openclaw@${OPENCLAW_VERSION}" && \
     npm cache clean --force && \
-    python3.13 -m pip install --no-cache-dir --upgrade pip boto3
+    python3 -m pip install --no-cache-dir --upgrade pip boto3
 
 # 统一 python/pip 命令名，避免版本差异导致命令不一致。
-RUN ln -sf /usr/bin/python3.13 /usr/local/bin/python3 && \
-    ln -sf /usr/bin/python3.13 /usr/local/bin/python && \
-    ln -sf /usr/bin/pip3.13 /usr/local/bin/pip3 && \
-    ln -sf /usr/bin/pip3.13 /usr/local/bin/pip
+RUN ln -sf /usr/bin/python3 /usr/local/bin/python3 && \
+    ln -sf /usr/bin/python3 /usr/local/bin/python && \
+    ln -sf /usr/bin/pip3 /usr/local/bin/pip3 && \
+    ln -sf /usr/bin/pip3 /usr/local/bin/pip
 
 # 在系统范围启用 Git LFS。
 RUN git lfs install --system
@@ -103,7 +114,7 @@ EXPOSE 18789
 
 # 基础健康检查：检查本地 gateway 端口是否可连通。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD python3.13 -c "import os,socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1', int(os.getenv('OPENCLAW_PORT','18789')))); s.close()" || exit 1
+  CMD python3 -c "import os,socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1', int(os.getenv('OPENCLAW_PORT','18789')))); s.close()" || exit 1
 
 ENTRYPOINT ["/usr/local/bin/openclaw-entrypoint.sh"]
 CMD []

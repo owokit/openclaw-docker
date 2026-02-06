@@ -125,7 +125,7 @@ apply_base_config() {
 }
 
 build_discord_guilds_json() {
-  python3.13 - <<'PY'
+  python3 - <<'PY'
 import json
 import os
 import re
