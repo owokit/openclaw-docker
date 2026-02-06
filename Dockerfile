@@ -16,20 +16,13 @@ ARG OPENCLAW_VERSION=latest
 ARG NODE_MAJOR=24
 
 # 使用 Ubuntu 24.04（最新 LTS）并通过 apt 安装基础工具链。
-# Ubuntu 官方源的 nodejs 版本通常偏旧，改用 NodeSource 安装 Node.js LTS。
+# Node.js 通过 nodejs.org 官方 tarball 安装，避免第三方 apt 源不稳定导致构建失败。
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
       gnupg \
-      software-properties-common && \
-    mkdir -p /etc/apt/keyrings && \
-    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list && \
-    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
-    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && \
-    apt-get update && \
+      xz-utils && \
     apt-get install -y --no-install-recommends \
       git \
       git-lfs \
@@ -37,12 +30,54 @@ RUN apt-get update && \
       python3 \
       python3-venv \
       python3-pip \
-      gh \
-      nodejs && \
+      gh && \
+    python3 - <<'PY' >/tmp/node-version.txt && \
+import json
+import os
+import urllib.request
+
+major = int(os.environ.get("NODE_MAJOR", "24"))
+with urllib.request.urlopen("https://nodejs.org/dist/index.json") as r:
+    data = json.load(r)
+
+best = None
+best_str = None
+for row in data:
+    v = row.get("version", "").lstrip("v")
+    parts = v.split(".")
+    if len(parts) != 3:
+        continue
+    try:
+        m, n, p = (int(parts[0]), int(parts[1]), int(parts[2]))
+    except ValueError:
+        continue
+    if m != major:
+        continue
+    tup = (m, n, p)
+    if best is None or tup > best:
+        best = tup
+        best_str = v
+
+if not best_str:
+    raise SystemExit(f"no Node.js versions found for major {major}")
+print(best_str)
+PY
+    NODE_VERSION="$(cat /tmp/node-version.txt)" && \
+    rm -f /tmp/node-version.txt && \
+    arch="$(dpkg --print-architecture)" && \
+    case "$arch" in \
+      amd64) node_arch="x64" ;; \
+      arm64) node_arch="arm64" ;; \
+      *) echo "unsupported arch for Node.js tarball: $arch" >&2; exit 1 ;; \
+    esac && \
+    curl -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" && \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
+    rm -f /tmp/node.tar.xz && \
     rm -rf /var/lib/apt/lists/*
 
 # 全局安装 OpenClaw CLI，并配置 python/pip 运行时。
 RUN git lfs install --system && \
+    node --version && npm --version && \
     python3 -m pip install --no-cache-dir boto3 && \
     ln -sf /usr/bin/python3 /usr/local/bin/python && \
     npm install -g --omit=dev --no-audit "openclaw@${OPENCLAW_VERSION}" && \
