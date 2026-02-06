@@ -57,6 +57,7 @@ openclaw onboard --install-daemon
 docker run -d --name openclaw \
   --restart unless-stopped \
   -v openclaw-data:/home/node/.openclaw \
+  -e GITHUB_TOKEN="<YOUR_GITHUB_TOKEN>" \
   -e DISCORD_GUILD_IDS="<YOUR_PRIVATE_GUILD_IDS>" \
   -e DISCORD_USER_IDS="<YOUR_PRIVATE_USER_IDS>" \
   -p 18789:18789 \
@@ -68,6 +69,7 @@ docker run -d --name openclaw \
 ```
 
 说明：
+- 只要传入 `GITHUB_TOKEN`，容器启动时会自动完成 GitHub HTTPS 凭据配置（写入 `~/.git-credentials` 并启用 `credential.helper store`），无需手动登录。
 - `DISCORD_*_IDS` 支持逗号或空格分隔多个 ID。
 - 上述区间映射默认是 TCP；如需 UDP，请额外加 `-p 11001-20000:1001-10000/udp`。
 
