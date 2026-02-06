@@ -28,7 +28,6 @@ RUN set -eux; \
       git-lfs \
       ca-certificates \
       curl-minimal \
-      coreutils \
       findutils \
       grep \
       gzip \
