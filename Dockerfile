@@ -13,6 +13,9 @@ ENV LANG=C.UTF-8 \
     OPENCLAW_PORT=18789
 
 ARG OPENCLAW_VERSION=latest
+ARG GH_VERSION=latest
+ARG TARGETOS
+ARG TARGETARCH
 
 # 使用 dnf 安装运行时与工具链（包管理优先）：
 # - nodejs24：openclaw CLI 依赖。
@@ -27,9 +30,37 @@ RUN dnf install -y --setopt=install_weak_deps=False \
       git-lfs \
       awscli-2 \
       ca-certificates \
+      curl \
+      gzip \
+      tar \
       shadow-utils && \
     dnf clean all && \
     rm -rf /var/cache/dnf
+
+# 安装 GitHub CLI（gh）
+# Amazon Linux 的 repo 不一定包含 gh，因此使用官方 release 的静态二进制包安装。
+RUN set -eux; \
+    case "${TARGETARCH:-$(uname -m)}" in \
+      amd64|x86_64) GH_ARCH="amd64" ;; \
+      arm64|aarch64) GH_ARCH="arm64" ;; \
+      *) echo "Unsupported arch for gh: ${TARGETARCH:-$(uname -m)}" >&2; exit 1 ;; \
+    esac; \
+    if [ "${GH_VERSION}" = "latest" ]; then \
+      GH_VERSION="$(python3.13 - <<'PY'\nimport json\nimport sys\nimport urllib.request\n\nurl = 'https://api.github.com/repos/cli/cli/releases/latest'\nreq = urllib.request.Request(url, headers={'User-Agent': 'openclaw-docker'})\nwith urllib.request.urlopen(req, timeout=30) as resp:\n    data = json.load(resp)\ntag = data.get('tag_name') or ''\nif tag.startswith('v'):\n    tag = tag[1:]\nif not tag:\n    print('Failed to resolve gh latest version', file=sys.stderr)\n    sys.exit(1)\nprint(tag)\nPY)"; \
+    fi; \
+    tmp="$(mktemp -d)"; \
+    cd "${tmp}"; \
+    gh_tgz="gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz"; \
+    gh_url="https://github.com/cli/cli/releases/download/v${GH_VERSION}/${gh_tgz}"; \
+    sums_url="https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_checksums.txt"; \
+    curl -fsSLO "${gh_url}"; \
+    curl -fsSLO "${sums_url}"; \
+    grep " ${gh_tgz}\$" "gh_${GH_VERSION}_checksums.txt" | sha256sum -c -; \
+    tar -xzf "${gh_tgz}"; \
+    install -m 0755 gh_"${GH_VERSION}"_linux_"${GH_ARCH}"/bin/gh /usr/local/bin/gh; \
+    /usr/local/bin/gh --version; \
+    cd /; \
+    rm -rf "${tmp}"
 
 # 全局安装 OpenClaw CLI，并安装 AWS 自动化常用的 boto3。
 RUN if ! command -v node >/dev/null 2>&1 && command -v node-24 >/dev/null 2>&1; then ln -sf /usr/bin/node-24 /usr/local/bin/node; fi && \
