@@ -31,7 +31,7 @@ RUN apt-get update && \
       python3-venv \
       python3-pip \
       gh && \
-    python3 - <<'PY' >/tmp/node-version.txt && \
+    python3 - <<'PY' >/tmp/node-version.txt
 import json
 import os
 import urllib.request
@@ -62,7 +62,8 @@ if not best_str:
     raise SystemExit(f"no Node.js versions found for major {major}")
 print(best_str)
 PY
-    NODE_VERSION="$(cat /tmp/node-version.txt)" && \
+
+RUN NODE_VERSION="$(cat /tmp/node-version.txt)" && \
     rm -f /tmp/node-version.txt && \
     arch="$(dpkg --print-architecture)" && \
     case "$arch" in \
