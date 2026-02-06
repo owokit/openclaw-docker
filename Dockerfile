@@ -19,6 +19,7 @@ ENV LANG=C.UTF-8 \
 RUN dnf update -y && \
     dnf install -y --setopt=install_weak_deps=False \
       nodejs24 \
+      nodejs24-npm \
       python3.13 \
       python3.13-pip \
       git \
@@ -30,7 +31,10 @@ RUN dnf update -y && \
     rm -rf /var/cache/dnf
 
 # 全局安装 OpenClaw CLI，并安装 AWS 自动化常用的 boto3。
-RUN npm install -g --omit=dev --no-audit openclaw@latest && \
+RUN if ! command -v node >/dev/null 2>&1 && command -v node-24 >/dev/null 2>&1; then ln -sf /usr/bin/node-24 /usr/local/bin/node; fi && \
+    if ! command -v npm >/dev/null 2>&1 && command -v npm-24 >/dev/null 2>&1; then ln -sf /usr/bin/npm-24 /usr/local/bin/npm; fi && \
+    node --version && npm --version && \
+    npm install -g --omit=dev --no-audit openclaw@latest && \
     npm cache clean --force && \
     python3.13 -m pip install --no-cache-dir --upgrade pip boto3
 
