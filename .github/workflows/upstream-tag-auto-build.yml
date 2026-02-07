@@ -3,7 +3,8 @@ name: 跟踪上游 tag 自动构建镜像
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 * * * *'
+    # GitHub Actions 的 cron 按 UTC 解释：每 2 小时一次（00:00 UTC 开始）。
+    - cron: '0 */2 * * *'
 
 concurrency:
   group: upstream-tag-auto-build
